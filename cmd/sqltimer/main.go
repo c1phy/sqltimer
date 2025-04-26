@@ -35,7 +35,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.2.7"
+	version          = "v0.2.8"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -132,12 +132,6 @@ func buildInjectedURL(rawURL, param, payload string) (string, error) {
 }
 
 func measureResponse(u string) (float64, error) {
-	if delaySeconds > 0 {
-		if doDebug {
-			fmt.Printf("%s Delay %ds before request: %s%s%s\n", prefixSlp, delaySeconds, colorYellow, u, colorReset)
-		}
-		time.Sleep(time.Duration(delaySeconds) * time.Second)
-	}
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return 0, err
@@ -174,7 +168,7 @@ func notifyUser(msg string) {
 	}
 }
 
-func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string]bool) {
+func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string]bool, ticker *time.Ticker) {
 	defer wg.Done()
 	for j := range jobs {
 		u, err := url.Parse(j.url)
@@ -182,6 +176,15 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 			continue
 		}
 		base := u.Scheme + "://" + u.Host + u.Path
+
+		// Sleep vor BaseRequest
+		if delaySeconds > 0 && ticker != nil {
+			if doDebug {
+				fmt.Printf("%s %sDelay %ds before base request to %s%s\n",
+					prefixSlp, colorGray, delaySeconds, u.Host, colorReset)
+			}
+			<-ticker.C
+		}
 
 		mu.Lock()
 		if seen[base] {
@@ -208,6 +211,15 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				injURL, err := buildInjectedURL(j.url, param, payload)
 				if err != nil || injURL == "" {
 					continue
+				}
+
+				// Sleep vor PayloadRequest
+				if delaySeconds > 0 && ticker != nil {
+					if doDebug {
+						fmt.Printf("%s %sDelay %ds before payload injection: param=%s payload=%s%s\n",
+							prefixSlp, colorGray, delaySeconds, param, payload, colorReset)
+					}
+					<-ticker.C
 				}
 
 				if doDebug {
@@ -479,9 +491,15 @@ func main() {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	var ticker *time.Ticker
+	if delaySeconds > 0 {
+		ticker = time.NewTicker(time.Duration(delaySeconds) * time.Second)
+		defer ticker.Stop()
+	}
+
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
-		go worker(jobs, &wg, &mu, seen)
+		go worker(jobs, &wg, &mu, seen, ticker)
 	}
 
 	for scanner.Scan() {
