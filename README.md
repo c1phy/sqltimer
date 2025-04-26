@@ -220,6 +220,6 @@ Marc-Oliver Munz – [munz4u.de](https://munz4u.de)
 - 🌐 Website: [https://munz4u.de](https://munz4u.de)
 - 🐦 Twitter/X: [@marcolivermunz](https://x.com/marcolivermunz)
 - 🌀 Bluesky: [@munz4u.de](https://bsky.app/profile/munz4u.de)
-- 💼 LinkedIn: [linkedin.com/in/marco-munz](https://linkedin.com/in/marco-munz)
+- 💼 LinkedIn: [linkedin.com/in/marc-oliver-munz](https://www.linkedin.com/in/marc-oliver-munz/)
 
 Feel free to connect, contribute, or give feedback!
