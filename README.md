@@ -22,6 +22,7 @@ A fast, minimalistic scanner for **time-based SQL injection (SQLi)** detection �
 - 🛠 **Replay-proxy support** to send only vulnerable payloads via `-replay-proxy`
 - 👤 **Custom User-Agent support** with `-user-agent`
 - 📂 **Custom HTTP headers** with multiple `-header "Key:Value"` options
+- 💤 **Delay between requests** configurable with `-delay`
 - 🔔 **Integration with [ProjectDiscovery notify](https://github.com/projectdiscovery/notify)** for real-time alerts (`-notify`)
 - 🧹 **Clean mode**: output only vulnerable URLs for chaining into other tools (`-clean`)
 - 🔧 **Extensive debug output** with color-coded logs (`-debug`)
@@ -205,6 +206,7 @@ All matches will be piped into your `notify` pipeline automatically.
 - Use `-replay-proxy` if you only want to replay **vulnerable payloads** through a different proxy (e.g., for logging or exploitation).
 - When both `-proxy` and `-replay-proxy` are set, **-proxy takes priority** and all traffic will use the main proxy.
 - Customize HTTP requests fully with `-user-agent` and `-header` to bypass basic WAF protections.
+- Introduce a `-delay` between requests (e.g., `-delay 2`) to slow down scan speed for unstable targets or rate-limited servers.
 
 ---
 
