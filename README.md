@@ -113,6 +113,7 @@ sqltimer/
 | `-timeoutmultiplier`   | Multiplier for sleep time to calculate HTTP timeout          | `6`          |
 | `-timeoutbuffer`       | Buffer (seconds) added to HTTP timeout                      | `10`         |
 | `-threads`             | Number of concurrent workers                                | `10`         |
+| `-delay`               | Delay between individual HTTP requests (seconds)            | `0`         |
 | **Request/Proxy Options**|                                                          |              |
 | `-proxy`               | Send all traffic through HTTP proxy                         | –            |
 | `-replay-proxy`        | Only send vulnerable payloads through proxy                 | –            |

@@ -25,19 +25,21 @@ var (
 	notify            = false
 	doDebug           = false
 	noColor           = false
-	payloadsFile      string
-	shouldEncode      bool
-	payloads          []string
-	preparedPayloads  []string
-	maxResponseTime   = 30.0
 	cleanOutput       = false
-	replayProxy       = false
-	version           = "v0.2.5"
-	client            *http.Client
-	replayClient      *http.Client
-	proxyURL          string
-	replayProxyURL    string
-	userAgent         string
+	shouldEncode      = false
+	delaySeconds      = 0
+
+	payloadsFile     string
+	proxyURL         string
+	replayProxyURL   string
+	userAgent        string
+	payloads         []string
+	preparedPayloads []string
+	version          = "v0.2.6"
+	maxResponseTime  = 30.0
+
+	client       *http.Client
+	replayClient *http.Client
 
 	colorReset   = "\033[0m"
 	colorRed     = "\033[31m"
@@ -171,6 +173,10 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 			continue
 		}
 
+		if delaySeconds > 0 {
+			time.Sleep(time.Duration(delaySeconds) * time.Second)
+		}
+
 		if doDebug {
 			fmt.Printf("%s Base response time measured: %s%.2fs%s for %s%s%s\n",
 				prefixIni,
@@ -194,6 +200,10 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				injTime, err := measureResponse(injURL)
 				if err != nil {
 					continue
+				}
+
+				if delaySeconds > 0 {
+					time.Sleep(time.Duration(delaySeconds) * time.Second)
 				}
 
 				delta := injTime - baseTime
@@ -396,6 +406,7 @@ func main() {
 	flag.StringVar(&userAgent, "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0", "User-Agent header to use")
 	flag.Var(&customHeaders, "header", "Custom header to add to requests, format: Key:Value")
 	flag.BoolVar(&shouldEncode, "encode", false, "URL encode SQL payloads")
+	flag.IntVar(&delaySeconds, "delay", 0, "Delay between requests in seconds")
 
 	// Output/Debugging Options
 	flag.BoolVar(&notify, "notify", false, "Send desktop notification on finding")
@@ -421,6 +432,16 @@ func main() {
 
 	setupHTTPClient()
 	setupReplayProxyClient()
+
+	if doDebug {
+		fmt.Printf("%s Delay between requests: %s%d seconds%s\n", prefixSet, colorYellow, delaySeconds, colorReset)
+		if len(customHeaders) > 0 {
+			fmt.Printf("%s Custom headers set:%s\n", prefixSet, colorReset)
+			for _, hdr := range customHeaders {
+				fmt.Printf("  %s%s%s\n", colorMagenta, hdr, colorReset)
+			}
+		}
+	}
 
 	var err error
 	payloads, err = loadPayloads(payloadsFile)
@@ -453,10 +474,11 @@ func main() {
 	wg.Wait()
 
 	if !cleanOutput {
-		fmt.Printf("%s✅ sqltimer scan finished%s: sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s\n",
+		fmt.Printf("%s✅ sqltimer scan finished%s: sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%ds%s\n",
 			colorGreen, colorReset,
 			colorYellow, sleepTime, colorReset,
 			colorCyan, negDrift, posDrift, colorReset,
-			colorMagenta, maxResponseTime, colorReset)
+			colorMagenta, maxResponseTime, colorReset,
+			colorBlue, delaySeconds, colorReset)
 	}
 }
