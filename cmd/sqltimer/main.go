@@ -35,7 +35,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.2.6"
+	version          = "v0.2.7"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -49,6 +49,7 @@ var (
 	colorMagenta = "\033[35m"
 	colorCyan    = "\033[36m"
 	colorWhite   = "\033[37m"
+	colorGray    = "\033[90m"
 
 	prefixSet = colorBlue + "[SET]" + colorReset
 	prefixInp = colorWhite + "[INP]" + colorReset
@@ -56,6 +57,7 @@ var (
 	prefixTst = colorMagenta + "[TST]" + colorReset
 	prefixPay = colorCyan + "[PAY]" + colorReset
 	prefixWrn = colorRed + "[WRN]" + colorReset
+	prefixSlp = colorGray + "[SLP]" + colorReset
 )
 
 type headerList []string
@@ -79,6 +81,19 @@ type job struct {
 	url string
 }
 
+func printLegend() {
+	fmt.Println()
+	fmt.Println("Legend (Prefixes):")
+	fmt.Printf("  %s [SET]%s   = Setting / Configuration Info\n", colorBlue, colorReset)
+	fmt.Printf("  %s [INP]%s   = Input URL received\n", colorWhite, colorReset)
+	fmt.Printf("  %s [INI]%s   = Initialization / Base request timing\n", colorYellow, colorReset)
+	fmt.Printf("  %s [TST]%s   = Test result (delta timing)\n", colorMagenta, colorReset)
+	fmt.Printf("  %s [PAY]%s   = Sending a payload\n", colorCyan, colorReset)
+	fmt.Printf("  %s [SLP]%s   = Sleeping (delay between requests)\n", colorGray, colorReset)
+	fmt.Printf("  %s [WRN]%s   = Warning (errors, issues)\n", colorRed, colorReset)
+	fmt.Println()
+}
+
 func disableColors() {
 	colorReset = ""
 	colorRed = ""
@@ -95,6 +110,7 @@ func disableColors() {
 	prefixTst = "[TST]"
 	prefixWrn = "[WRN]"
 	prefixPay = "[PAY]"
+	prefixSlp = "[SLP]"
 }
 
 func buildInjectedURL(rawURL, param, payload string) (string, error) {
@@ -116,6 +132,12 @@ func buildInjectedURL(rawURL, param, payload string) (string, error) {
 }
 
 func measureResponse(u string) (float64, error) {
+	if delaySeconds > 0 {
+		if doDebug {
+			fmt.Printf("%s Delay %ds before request: %s%s%s\n", prefixSlp, delaySeconds, colorYellow, u, colorReset)
+		}
+		time.Sleep(time.Duration(delaySeconds) * time.Second)
+	}
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return 0, err
@@ -173,10 +195,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 			continue
 		}
 
-		if delaySeconds > 0 {
-			time.Sleep(time.Duration(delaySeconds) * time.Second)
-		}
-
 		if doDebug {
 			fmt.Printf("%s Base response time measured: %s%.2fs%s for %s%s%s\n",
 				prefixIni,
@@ -200,10 +218,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				injTime, err := measureResponse(injURL)
 				if err != nil {
 					continue
-				}
-
-				if delaySeconds > 0 {
-					time.Sleep(time.Duration(delaySeconds) * time.Second)
 				}
 
 				delta := injTime - baseTime
@@ -413,6 +427,13 @@ func main() {
 	flag.BoolVar(&doDebug, "debug", false, "Enable debug output")
 	flag.BoolVar(&noColor, "nocolor", false, "Disable colored output")
 	flag.BoolVar(&cleanOutput, "clean", false, "Output only vulnerable URLs (stdout only)")
+
+	// Flags
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		printLegend()
+	}
 
 	flag.Parse()
 
