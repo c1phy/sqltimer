@@ -14,6 +14,7 @@ A fast, minimalistic scanner for **time-based SQL injection (SQLi)** detection �
 - ⚡ Detects SQLi via **timing differences** (`sleep(n)`) with drift-based precision
 - 🎯 Supports **dynamic `{SLEEP}` placeholder** injection into payloads
 - 🌐 Optional **URL encoding** of injected payloads (`-encode`)
+- 🔁 Supports **GET** and **POST** methods (`-post`)
 - 🧵 **Multi-threaded** scanning with configurable workers (`-threads`)
 - 🧐 **Drift-based detection** to handle network jitter (`-negdrift` / `-posdrift`)
 - ❌ **Maximum response time limit** to reduce false positives (`-maxtime`)
@@ -120,6 +121,7 @@ sqltimer/
 | `-replay-proxy`        | Only send vulnerable payloads through proxy                 | –            |
 | `-user-agent`          | Custom User-Agent string                                    | Firefox 124  |
 | `-header`              | Add custom header(s) (`Key:Value`) – can be used multiple times | –         |
+| `-post`                | Send payloads using POST method instead of GET              | `false`      |
 | `-encode`              | URL-encode payloads before injecting                        | `false`      |
 | **Output/Debugging Options**|                                                      |              |
 | `-notify`              | Send matches to [notify](https://github.com/projectdiscovery/notify) | `false` |
@@ -207,6 +209,7 @@ All matches will be piped into your `notify` pipeline automatically.
 - When both `-proxy` and `-replay-proxy` are set, **-proxy takes priority** and all traffic will use the main proxy.
 - Customize HTTP requests fully with `-user-agent` and `-header` to bypass basic WAF protections.
 - Introduce a `-delay` between requests (e.g., `-delay 2`) to slow down scan speed for unstable targets or rate-limited servers.
+- Try `-post` if GET is filtered or blocked - sometimes POST works better!
 
 ---
 

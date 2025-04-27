@@ -1,4 +1,3 @@
-// Imports
 package main
 
 import (
@@ -27,7 +26,10 @@ var (
 	noColor           = false
 	cleanOutput       = false
 	shouldEncode      = false
+	usePost           = false
 	delaySeconds      = 0
+
+	customHeaders headerList
 
 	payloadsFile     string
 	proxyURL         string
@@ -35,7 +37,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.2.8"
+	version          = "v0.2.9"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -75,8 +77,6 @@ func (h *headerList) Set(value string) error {
 	return nil
 }
 
-var customHeaders headerList
-
 type job struct {
 	url string
 }
@@ -92,6 +92,26 @@ func printLegend() {
 	fmt.Printf("  %s [SLP]%s   = Sleeping (delay between requests)\n", colorGray, colorReset)
 	fmt.Printf("  %s [WRN]%s   = Warning (errors, issues)\n", colorRed, colorReset)
 	fmt.Println()
+}
+
+func printBanner() {
+	method := "GET"
+	if usePost {
+		method = "POST"
+	}
+
+	if noColor {
+		fmt.Fprintf(os.Stderr, "🚀 sqltimer %s | sleep=%d | drift=±%.1f/%.1f | maxtime=%.1fs | delay=%ds | method=%s\n",
+			version, sleepTime, negDrift, posDrift, maxResponseTime, delaySeconds, method)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s🚀 sqltimer %s%s | sleep=%s%d%s | drift=±%s%.1f/%.1f%s | maxtime=%s%.1fs%s | delay=%s%ds%s | method=%s%s%s\n",
+			colorCyan, version, colorReset,
+			colorYellow, sleepTime, colorReset,
+			colorCyan, negDrift, posDrift, colorReset,
+			colorMagenta, maxResponseTime, colorReset,
+			colorBlue, delaySeconds, colorReset,
+			colorGreen, method, colorReset)
+	}
 }
 
 func disableColors() {
@@ -168,6 +188,48 @@ func notifyUser(msg string) {
 	}
 }
 
+func sendRequest(targetURL, param, payload string) (float64, error) {
+	var req *http.Request
+	var err error
+
+	if usePost {
+		var bodyData string
+		if shouldEncode {
+			bodyData = param + "=" + payload
+		} else {
+			data := url.Values{}
+			data.Set(param, payload)
+			bodyData = data.Encode()
+		}
+		req, err = http.NewRequest("POST", targetURL, strings.NewReader(bodyData))
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		req, err = http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+	for _, hdr := range customHeaders {
+		parts := strings.SplitN(hdr, ":", 2)
+		if len(parts) == 2 {
+			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return time.Since(start).Seconds(), nil
+}
+
 func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string]bool, ticker *time.Ticker) {
 	defer wg.Done()
 	for j := range jobs {
@@ -177,7 +239,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		}
 		base := u.Scheme + "://" + u.Host + u.Path
 
-		// Sleep vor BaseRequest
 		if delaySeconds > 0 && ticker != nil {
 			if doDebug {
 				fmt.Printf("%s %sDelay %ds before base request to %s%s\n",
@@ -213,7 +274,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 					continue
 				}
 
-				// Sleep vor PayloadRequest
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
 						fmt.Printf("%s %sDelay %ds before payload injection: param=%s payload=%s%s\n",
@@ -227,7 +287,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						prefixPay, colorMagenta, param, colorReset, colorYellow, injURL, colorReset)
 				}
 
-				injTime, err := measureResponse(injURL)
+				injTime, err := sendRequest(injURL, param, payload)
 				if err != nil {
 					continue
 				}
@@ -250,19 +310,23 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				for i := 1; i <= maxRepeats; i++ {
 					expected := float64(sleepTime) * float64(i)
 					if delta >= expected-negDrift && delta <= expected+posDrift {
+						vulnerableParam := param
+						vulnerablePayload := payload
+						vulnerableURL := injURL
+
 						fullMessage := fmt.Sprintf(
 							"%s🔥 SQLi suspicion%s in param %s'%s'%s with payload %s'%s'%s → %s%s%s → (%sΔ=%.2fs%s ≈ %s%dx sleep%s ±%s%.1fs/%.1fs%s)",
 							colorRed, colorReset,
-							colorCyan, param, colorReset,
-							colorMagenta, payload, colorReset,
-							colorWhite, j.url, colorReset,
+							colorCyan, vulnerableParam, colorReset,
+							colorMagenta, vulnerablePayload, colorReset,
+							colorWhite, vulnerableURL, colorReset,
 							colorCyan, delta, colorReset,
 							colorMagenta, i, colorReset,
 							colorCyan, negDrift, posDrift, colorReset,
 						)
 
 						if cleanOutput {
-							fmt.Printf("%s [param:%s]\n", j.url, param)
+							fmt.Printf("%s [param:%s]\n", vulnerableURL, vulnerableParam)
 						} else {
 							fmt.Println(fullMessage)
 						}
@@ -272,7 +336,17 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						}
 
 						if replayProxyURL != "" && replayClient != nil {
-							replayReq, err := http.NewRequest("GET", injURL, nil)
+							var replayReq *http.Request
+							if usePost {
+								data := url.Values{}
+								data.Set(vulnerableParam, vulnerablePayload)
+								replayReq, err = http.NewRequest("POST", vulnerableURL, strings.NewReader(data.Encode()))
+								if err == nil {
+									replayReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+								}
+							} else {
+								replayReq, err = http.NewRequest("GET", vulnerableURL, nil)
+							}
 							if err != nil {
 								if doDebug {
 									fmt.Printf("%s Failed to create replay request: %v\n", prefixSet, err)
@@ -287,7 +361,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 								}
 
 								if doDebug {
-									fmt.Printf("%s Sending replay request: %s%s%s\n", prefixSet, colorBlue, injURL, colorReset)
+									fmt.Printf("%s Sending replay request: %s%s%s\n", prefixSet, colorBlue, vulnerableURL, colorReset)
 								}
 								resp, err := replayClient.Do(replayReq)
 								if err != nil {
@@ -297,7 +371,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 								} else {
 									resp.Body.Close()
 									if doDebug {
-										fmt.Printf("%s Replay request succeeded: %s%s%s\n", prefixSet, colorYellow, injURL, colorReset)
+										fmt.Printf("%s Replay request succeeded: %s%s%s\n", prefixSet, colorYellow, vulnerableURL, colorReset)
 									}
 								}
 							}
@@ -431,6 +505,7 @@ func main() {
 	flag.StringVar(&replayProxyURL, "replay-proxy", "", "Replay vulnerable URLs through proxy (only hits)")
 	flag.StringVar(&userAgent, "user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0", "User-Agent header to use")
 	flag.Var(&customHeaders, "header", "Custom header to add to requests, format: Key:Value")
+	flag.BoolVar(&usePost, "post", false, "Send payloads as POST requests instead of GET")
 	flag.BoolVar(&shouldEncode, "encode", false, "URL encode SQL payloads")
 	flag.IntVar(&delaySeconds, "delay", 0, "Delay between requests in seconds")
 
@@ -448,6 +523,8 @@ func main() {
 	}
 
 	flag.Parse()
+
+	printBanner()
 
 	if noColor {
 		disableColors()
@@ -512,12 +589,18 @@ func main() {
 	close(jobs)
 	wg.Wait()
 
+	method := "GET"
+	if usePost {
+		method = "POST"
+	}
+
 	if !cleanOutput {
-		fmt.Printf("%s✅ sqltimer scan finished%s: sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%ds%s\n",
+		fmt.Printf("%s✅ sqltimer finished%s | sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%ds%s | method=%s%s%s\n",
 			colorGreen, colorReset,
 			colorYellow, sleepTime, colorReset,
 			colorCyan, negDrift, posDrift, colorReset,
 			colorMagenta, maxResponseTime, colorReset,
-			colorBlue, delaySeconds, colorReset)
+			colorBlue, delaySeconds, colorReset,
+			colorGreen, method, colorReset)
 	}
 }
