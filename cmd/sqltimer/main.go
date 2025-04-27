@@ -37,7 +37,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.2.9"
+	version          = "v0.3.0"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -314,8 +314,13 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						vulnerablePayload := payload
 						vulnerableURL := injURL
 
+						method := "GET"
+						if usePost {
+							method = "POST"
+						}
+
 						fullMessage := fmt.Sprintf(
-							"%s🔥 SQLi suspicion%s in param %s'%s'%s with payload %s'%s'%s → %s%s%s → (%sΔ=%.2fs%s ≈ %s%dx sleep%s ±%s%.1fs/%.1fs%s)",
+							"%s🔥 SQLi suspicion%s in param %s'%s'%s with payload %s'%s'%s → %s%s%s → (%sΔ=%.2fs%s ≈ %s%dx sleep%s ±%s%.1fs/%.1fs%s | method=%s%s%s)",
 							colorRed, colorReset,
 							colorCyan, vulnerableParam, colorReset,
 							colorMagenta, vulnerablePayload, colorReset,
@@ -323,6 +328,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 							colorCyan, delta, colorReset,
 							colorMagenta, i, colorReset,
 							colorCyan, negDrift, posDrift, colorReset,
+							colorGreen, method, colorReset,
 						)
 
 						if cleanOutput {
