@@ -594,6 +594,10 @@ func main() {
 		}
 		jobs <- job{url: rawURL}
 	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "[!] Failed to read stdin: %v\n", err)
+		os.Exit(1)
+	}
 	close(jobs)
 	wg.Wait()
 
