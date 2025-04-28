@@ -69,8 +69,7 @@ func (h *headerList) String() string {
 }
 
 func (h *headerList) Set(value string) error {
-	parts := strings.SplitN(value, ":", 2)
-	if len(parts) != 2 {
+	if strings.IndexByte(value, ':') < 0 {
 		return fmt.Errorf("%s invalid header format: must be Key:Value%s", colorRed, colorReset)
 	}
 	*h = append(*h, value)
@@ -158,10 +157,11 @@ func measureResponse(u string) (float64, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 	for _, hdr := range customHeaders {
-		parts := strings.SplitN(hdr, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		name, value, ok := strings.Cut(hdr, ":")
+		if !ok {
+			continue
 		}
+		req.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
 	}
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -215,10 +215,11 @@ func sendRequest(targetURL, param, payload string) (float64, error) {
 
 	req.Header.Set("User-Agent", userAgent)
 	for _, hdr := range customHeaders {
-		parts := strings.SplitN(hdr, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		name, value, ok := strings.Cut(hdr, ":")
+		if !ok {
+			continue
 		}
+		req.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
 	}
 
 	start := time.Now()
@@ -360,10 +361,11 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 							} else {
 								replayReq.Header.Set("User-Agent", userAgent)
 								for _, hdr := range customHeaders {
-									parts := strings.SplitN(hdr, ":", 2)
-									if len(parts) == 2 {
-										replayReq.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+									name, value, ok := strings.Cut(hdr, ":")
+									if !ok {
+										continue
 									}
+									replayReq.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
 								}
 
 								if doDebug {
