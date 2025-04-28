@@ -37,7 +37,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.3.0"
+	version          = "v0.3.1"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -333,7 +333,11 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						)
 
 						if cleanOutput {
-							fmt.Printf("%s [param:%s]\n", vulnerableURL, vulnerableParam)
+							method := "GET"
+							if usePost {
+								method = "POST"
+							}
+							fmt.Printf("%s [param:%s] [method:%s]\n", vulnerableURL, vulnerableParam, method)
 						} else {
 							fmt.Println(fullMessage)
 						}
