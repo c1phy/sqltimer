@@ -27,7 +27,8 @@ var (
 	cleanOutput       = false
 	shouldEncode      = false
 	usePost           = false
-	delaySeconds      = 0
+
+	delaySeconds float64
 
 	customHeaders headerList
 
@@ -37,7 +38,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.3.1"
+	version          = "v0.3.2"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -100,10 +101,10 @@ func printBanner() {
 	}
 
 	if noColor {
-		fmt.Fprintf(os.Stderr, "🚀 sqltimer %s | sleep=%d | drift=±%.1f/%.1f | maxtime=%.1fs | delay=%ds | method=%s\n",
+		fmt.Fprintf(os.Stderr, "🚀 sqltimer %s | sleep=%d | drift=±%.1f/%.1f | maxtime=%.1fs | delay=%.1fs | method=%s\n",
 			version, sleepTime, negDrift, posDrift, maxResponseTime, delaySeconds, method)
 	} else {
-		fmt.Fprintf(os.Stderr, "%s🚀 sqltimer %s%s | sleep=%s%d%s | drift=±%s%.1f/%.1f%s | maxtime=%s%.1fs%s | delay=%s%ds%s | method=%s%s%s\n",
+		fmt.Fprintf(os.Stderr, "%s🚀 sqltimer %s%s | sleep=%s%d%s | drift=±%s%.1f/%.1f%s | maxtime=%s%.1fs%s | delay=%s%.1fs%s | method=%s%s%s\n",
 			colorCyan, version, colorReset,
 			colorYellow, sleepTime, colorReset,
 			colorCyan, negDrift, posDrift, colorReset,
@@ -242,7 +243,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 
 		if delaySeconds > 0 && ticker != nil {
 			if doDebug {
-				fmt.Printf("%s %sDelay %ds before base request to %s%s\n",
+				fmt.Printf("%s %sDelay %.1fs before base request to %s%s\n",
 					prefixSlp, colorGray, delaySeconds, u.Host, colorReset)
 			}
 			<-ticker.C
@@ -277,7 +278,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
-						fmt.Printf("%s %sDelay %ds before payload injection: param=%s payload=%s%s\n",
+						fmt.Printf("%s %sDelay %.1fs before payload injection: param=%s payload=%s%s\n",
 							prefixSlp, colorGray, delaySeconds, param, payload, colorReset)
 					}
 					<-ticker.C
@@ -519,7 +520,7 @@ func main() {
 	flag.Var(&customHeaders, "header", "Custom header to add to requests, format: Key:Value")
 	flag.BoolVar(&usePost, "post", false, "Send payloads as POST requests instead of GET")
 	flag.BoolVar(&shouldEncode, "encode", false, "URL encode SQL payloads")
-	flag.IntVar(&delaySeconds, "delay", 0, "Delay between requests in seconds")
+	flag.Float64Var(&delaySeconds, "delay", 0, "Delay between requests in seconds")
 
 	// Output/Debugging Options
 	flag.BoolVar(&notify, "notify", false, "Send desktop notification on finding")
@@ -536,15 +537,15 @@ func main() {
 
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Println("sqltimer version:", version)
+		os.Exit(0)
+	}
+
 	printBanner()
 
 	if noColor {
 		disableColors()
-	}
-
-	if *showVersion {
-		fmt.Println("sqltimer version:", version)
-		os.Exit(0)
 	}
 
 	if payloadsFile == "" {
@@ -556,7 +557,7 @@ func main() {
 	setupReplayProxyClient()
 
 	if doDebug {
-		fmt.Printf("%s Delay between requests: %s%d seconds%s\n", prefixSet, colorYellow, delaySeconds, colorReset)
+		fmt.Printf("%s Delay between requests: %s%.1fs%s\n", prefixSet, colorYellow, delaySeconds, colorReset)
 		if len(customHeaders) > 0 {
 			fmt.Printf("%s Custom headers set:%s\n", prefixSet, colorReset)
 			for _, hdr := range customHeaders {
@@ -582,7 +583,7 @@ func main() {
 
 	var ticker *time.Ticker
 	if delaySeconds > 0 {
-		ticker = time.NewTicker(time.Duration(delaySeconds) * time.Second)
+		ticker = time.NewTicker(time.Duration(delaySeconds * float64(time.Second)))
 		defer ticker.Stop()
 	}
 
@@ -611,7 +612,7 @@ func main() {
 	}
 
 	if !cleanOutput {
-		fmt.Printf("%s✅ sqltimer finished%s | sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%ds%s | method=%s%s%s\n",
+		fmt.Printf("%s✅ sqltimer finished%s | sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%.1fs%s | method=%s%s%s\n",
 			colorGreen, colorReset,
 			colorYellow, sleepTime, colorReset,
 			colorCyan, negDrift, posDrift, colorReset,
