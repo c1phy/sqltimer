@@ -32,13 +32,15 @@ var (
 
 	customHeaders headerList
 
+	stopAtFirstMatch bool
+
 	payloadsFile     string
 	proxyURL         string
 	replayProxyURL   string
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.3.2"
+	version          = "v0.3.3"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -269,6 +271,8 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		}
 
 		params := u.Query()
+		found := false
+
 		for param := range params {
 			for _, payload := range preparedPayloads {
 				injURL, err := buildInjectedURL(j.url, param, payload)
@@ -334,10 +338,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						)
 
 						if cleanOutput {
-							method := "GET"
-							if usePost {
-								method = "POST"
-							}
 							fmt.Printf("%s [param:%s] [method:%s]\n", vulnerableURL, vulnerableParam, method)
 						} else {
 							fmt.Println(fullMessage)
@@ -393,9 +393,21 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						mu.Lock()
 						seen[base] = true
 						mu.Unlock()
+						found = true
 						break
 					}
 				}
+
+				if stopAtFirstMatch && found {
+					if doDebug {
+						fmt.Printf("%s Stopping after first successful payload (param=%s) due to -spm\n", prefixSet, param)
+					}
+					break
+				}
+			}
+
+			if stopAtFirstMatch && found {
+				break
 			}
 		}
 	}
@@ -422,6 +434,9 @@ func loadPayloads(file string) ([]string, error) {
 func preparePayloads() []string {
 	var prepared []string
 	for _, payload := range payloads {
+		if !strings.Contains(payload, "{SLEEP}") {
+			continue
+		}
 		injection := strings.ReplaceAll(payload, "{SLEEP}", fmt.Sprintf("%d", sleepTime))
 		if shouldEncode {
 			injection = url.QueryEscape(injection)
@@ -512,6 +527,7 @@ func main() {
 	flag.IntVar(&timeoutMultiplier, "timeoutmultiplier", 6, "Multiplier for calculating HTTP timeout")
 	flag.IntVar(&timeoutBuffer, "timeoutbuffer", 10, "Buffer (seconds) added to HTTP timeout")
 	flag.IntVar(&maxWorkers, "threads", 10, "Maximum number of concurrent workers")
+	flag.BoolVar(&stopAtFirstMatch, "spm", false, "Stop at first matching payload per URL")
 
 	// Request/Proxy Options
 	flag.StringVar(&proxyURL, "proxy", "", "Proxy URL, e.g. http://127.0.0.1:8080")
@@ -574,6 +590,12 @@ func main() {
 	}
 
 	preparedPayloads = preparePayloads()
+
+	if doDebug {
+		fmt.Printf("%s Loaded %s%d%s payloads (with {SLEEP}) from %s%s%s\n",
+			prefixSet, colorMagenta, len(preparedPayloads), colorReset,
+			colorYellow, payloadsFile, colorReset)
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	jobs := make(chan job, 100)

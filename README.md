@@ -116,6 +116,7 @@ sqltimer/
 | `-timeoutbuffer`       | Buffer (seconds) added to HTTP timeout                      | `10`         |
 | `-threads`             | Number of concurrent workers                                | `10`         |
 | `-delay`               | Delay between individual HTTP requests (seconds)            | `0`         |
+| `-spm`                 | Stop processing more payloads for a URL after first match   | `false`      |
 | **Request/Proxy Options**|                                                          |              |
 | `-proxy`               | Send all traffic through HTTP proxy                         | –            |
 | `-replay-proxy`        | Only send vulnerable payloads through proxy                 | –            |
@@ -210,6 +211,7 @@ All matches will be piped into your `notify` pipeline automatically.
 - Customize HTTP requests fully with `-user-agent` and `-header` to bypass basic WAF protections.
 - Introduce a `-delay` between requests (e.g., `-delay 2`) to slow down scan speed for unstable targets or rate-limited servers.
 - Try `-post` if GET is filtered or blocked - sometimes POST works better!
+- Use `-spm` to minimize requests and move on to the next URL as soon as a payload hits.
 
 ---
 
