@@ -27,6 +27,7 @@ A fast, minimalistic scanner for **time-based SQL injection (SQLi)** detection �
 - 🔔 **Integration with [ProjectDiscovery notify](https://github.com/projectdiscovery/notify)** for real-time alerts (`-notify`)
 - 🧹 **Clean mode**: output only vulnerable URLs for chaining into other tools (`-clean`)
 - 🔧 **Extensive debug output** with color-coded logs (`-debug`)
+- 🚦 **Stop at first match** (`-spm`): if one payload indicates a possible SQLi, further payloads for the same URL are skipped — reduces requests and speeds up scanning
 - 📦 **Go install ready** — easy to build, no external dependencies
 
 ---
