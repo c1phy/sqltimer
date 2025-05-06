@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,7 +34,8 @@ var (
 
 	customHeaders headerList
 
-	stopAtFirstMatch bool
+	stopAtFirstMatch    bool
+	useUserAgentPayload bool
 
 	payloadsFile     string
 	proxyURL         string
@@ -40,7 +43,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.3.3"
+	version          = "v0.4.0"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -83,6 +86,11 @@ type job struct {
 	url string
 }
 
+type recordedRequest struct {
+	Request *http.Request
+	Body    string
+}
+
 func printLegend() {
 	fmt.Println()
 	fmt.Println("Legend (Prefixes):")
@@ -97,10 +105,7 @@ func printLegend() {
 }
 
 func printBanner() {
-	method := "GET"
-	if usePost {
-		method = "POST"
-	}
+	method := getMethod()
 
 	if noColor {
 		fmt.Fprintf(os.Stderr, "🚀 sqltimer %s | sleep=%d | drift=±%.1f/%.1f | maxtime=%.1fs | delay=%.1fs | method=%s\n",
@@ -135,6 +140,30 @@ func disableColors() {
 	prefixSlp = "[SLP]"
 }
 
+func colorize(s, color string) string {
+	if noColor {
+		return s
+	}
+	return color + s + colorReset
+}
+
+func getMethod() string {
+	if usePost {
+		return "POST"
+	}
+	return "GET"
+}
+
+func (h *headerList) ApplyTo(req *http.Request) {
+	for _, hdr := range *h {
+		name, value, ok := strings.Cut(hdr, ":")
+		if !ok {
+			continue
+		}
+		req.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
+	}
+}
+
 func buildInjectedURL(rawURL, param, payload string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -159,13 +188,7 @@ func measureResponse(u string) (float64, error) {
 		return 0, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	for _, hdr := range customHeaders {
-		name, value, ok := strings.Cut(hdr, ":")
-		if !ok {
-			continue
-		}
-		req.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
-	}
+	customHeaders.ApplyTo(req)
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -173,6 +196,13 @@ func measureResponse(u string) (float64, error) {
 	}
 	defer resp.Body.Close()
 	return time.Since(start).Seconds(), nil
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func notifyUser(msg string) {
@@ -184,6 +214,11 @@ func notifyUser(msg string) {
 		}
 		cmd := exec.Command("notify")
 		cmd.Stdin = strings.NewReader(msg)
+
+		if doDebug {
+			fmt.Printf("%s %sNotify sent:%s %s\n", prefixSet, colorYellow, colorReset, colorize(truncate(msg, 80), colorGray))
+		}
+
 		err = cmd.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s Error calling notify: %v\n", prefixWrn, err)
@@ -191,12 +226,12 @@ func notifyUser(msg string) {
 	}
 }
 
-func sendRequest(targetURL, param, payload string) (float64, error) {
+func sendRequest(targetURL, param, payload string) (float64, *recordedRequest, error) {
 	var req *http.Request
 	var err error
+	var bodyData string
 
 	if usePost {
-		var bodyData string
 		if shouldEncode {
 			bodyData = param + "=" + payload
 		} else {
@@ -206,32 +241,102 @@ func sendRequest(targetURL, param, payload string) (float64, error) {
 		}
 		req, err = http.NewRequest("POST", targetURL, strings.NewReader(bodyData))
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	} else {
 		req, err = http.NewRequest("GET", targetURL, nil)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
 
 	req.Header.Set("User-Agent", userAgent)
-	for _, hdr := range customHeaders {
-		name, value, ok := strings.Cut(hdr, ":")
-		if !ok {
-			continue
-		}
-		req.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
-	}
+	customHeaders.ApplyTo(req)
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	return time.Since(start).Seconds(), nil
+
+	duration := time.Since(start).Seconds()
+	return duration, &recordedRequest{Request: req, Body: bodyData}, nil
+}
+
+func doReplayFromRequest(r *recordedRequest) {
+	if replayProxyURL == "" || replayClient == nil || r == nil || r.Request == nil {
+		return
+	}
+
+	clone := r.Request.Clone(context.Background())
+	if r.Body != "" {
+		clone.Body = io.NopCloser(strings.NewReader(r.Body))
+	}
+
+	if doDebug {
+		fmt.Printf("%s Sending replay via proxy %s%s%s to: %s%s%s\n",
+			prefixSet,
+			colorYellow, replayProxyURL, colorReset,
+			colorBlue, r.Request.URL.String(), colorReset)
+	}
+
+	resp, err := replayClient.Do(clone)
+	if err != nil {
+		if doDebug {
+			fmt.Printf("%s Replay failed: %v\n", prefixSet, err)
+		}
+		return
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if doDebug {
+		fmt.Printf("%s Replay request succeeded: %s%s%s\n", prefixSet, colorYellow, r.Request.URL.String(), colorReset)
+	}
+}
+
+func reportFinding(url, param, payload string, delta float64, repeat int, uaMode bool) {
+	method := getMethod()
+
+	var fullMessage string
+	contextInfo := fmt.Sprintf(
+		"via User-Agent%s with payload %s'%s'%s",
+		colorReset, colorMagenta, payload, colorReset,
+	)
+
+	if !uaMode {
+		contextInfo = fmt.Sprintf(
+			"in param %s'%s'%s with payload %s'%s'%s",
+			colorCyan, param, colorReset,
+			colorMagenta, payload, colorReset,
+		)
+	}
+
+	fullMessage = fmt.Sprintf(
+		"%s🔥 SQLi suspicion %s → %s%s%s → (%sΔ=%.2fs%s ≈ %s%dx sleep%s ±%s%.1fs/%.1fs%s | method=%s%s%s)",
+		colorRed, contextInfo,
+		colorWhite, url, colorReset,
+		colorCyan, delta, colorReset,
+		colorMagenta, repeat, colorReset,
+		colorCyan, negDrift, posDrift, colorReset,
+		colorGreen, method, colorReset,
+	)
+
+	if cleanOutput {
+		if uaMode {
+			fmt.Printf("%s [param:user-agent] [method:%s] [payload:%s]\n", url, method, payload)
+		} else {
+			fmt.Printf("%s [param:%s] [method:%s] [payload:%s]\n", url, param, method, payload)
+		}
+	} else {
+		fmt.Println(fullMessage)
+	}
+
+	if notify {
+		notifyUser(fullMessage)
+	}
 }
 
 func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string]bool, ticker *time.Ticker) {
@@ -243,10 +348,22 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		}
 		base := u.Scheme + "://" + u.Host + u.Path
 
+		var baseTime float64
+
+		params := u.Query()
+		if len(params) == 0 && !useUserAgentPayload {
+			if doDebug {
+				fmt.Printf("%s %sSkipping URL (no params, no add-ua):%s %s%s%s\n",
+					prefixWrn,
+					colorGray, colorReset,
+					colorYellow, j.url, colorReset)
+			}
+			continue
+		}
+
 		if delaySeconds > 0 && ticker != nil {
 			if doDebug {
-				fmt.Printf("%s %sDelay %.1fs before base request to %s%s\n",
-					prefixSlp, colorGray, delaySeconds, u.Host, colorReset)
+				fmt.Printf("%s %s\n", prefixSlp, colorize(fmt.Sprintf("Delay %.1fs before base request to %s", delaySeconds, u.Host), colorGray))
 			}
 			<-ticker.C
 		}
@@ -258,19 +375,16 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		}
 		mu.Unlock()
 
-		baseTime, err := measureResponse(j.url)
+		baseTime, err = measureResponse(j.url)
 		if err != nil {
 			continue
 		}
 
 		if doDebug {
 			fmt.Printf("%s Base response time measured: %s%.2fs%s for %s%s%s\n",
-				prefixIni,
-				colorCyan, baseTime, colorReset,
-				colorYellow, j.url, colorReset)
+				prefixIni, colorCyan, baseTime, colorReset, colorYellow, j.url, colorReset)
 		}
 
-		params := u.Query()
 		found := false
 
 		for param := range params {
@@ -282,8 +396,9 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
-						fmt.Printf("%s %sDelay %.1fs before payload injection: param=%s payload=%s%s\n",
-							prefixSlp, colorGray, delaySeconds, param, payload, colorReset)
+						fmt.Printf("%s %s\n", prefixSlp,
+							colorize(fmt.Sprintf("Delay %.1fs before payload injection: param=%s payload=%s",
+								delaySeconds, param, payload), colorGray))
 					}
 					<-ticker.C
 				}
@@ -293,7 +408,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						prefixPay, colorMagenta, param, colorReset, colorYellow, injURL, colorReset)
 				}
 
-				injTime, err := sendRequest(injURL, param, payload)
+				injTime, recorded, err := sendRequest(injURL, param, payload)
 				if err != nil {
 					continue
 				}
@@ -311,85 +426,12 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				if delta > maxResponseTime {
 					continue
 				}
-
 				maxRepeats := 10
 				for i := 1; i <= maxRepeats; i++ {
 					expected := float64(sleepTime) * float64(i)
 					if delta >= expected-negDrift && delta <= expected+posDrift {
-						vulnerableParam := param
-						vulnerablePayload := payload
-						vulnerableURL := injURL
-
-						method := "GET"
-						if usePost {
-							method = "POST"
-						}
-
-						fullMessage := fmt.Sprintf(
-							"%s🔥 SQLi suspicion%s in param %s'%s'%s with payload %s'%s'%s → %s%s%s → (%sΔ=%.2fs%s ≈ %s%dx sleep%s ±%s%.1fs/%.1fs%s | method=%s%s%s)",
-							colorRed, colorReset,
-							colorCyan, vulnerableParam, colorReset,
-							colorMagenta, vulnerablePayload, colorReset,
-							colorWhite, vulnerableURL, colorReset,
-							colorCyan, delta, colorReset,
-							colorMagenta, i, colorReset,
-							colorCyan, negDrift, posDrift, colorReset,
-							colorGreen, method, colorReset,
-						)
-
-						if cleanOutput {
-							fmt.Printf("%s [param:%s] [method:%s]\n", vulnerableURL, vulnerableParam, method)
-						} else {
-							fmt.Println(fullMessage)
-						}
-
-						if notify {
-							notifyUser(fullMessage)
-						}
-
-						if replayProxyURL != "" && replayClient != nil {
-							var replayReq *http.Request
-							if usePost {
-								data := url.Values{}
-								data.Set(vulnerableParam, vulnerablePayload)
-								replayReq, err = http.NewRequest("POST", vulnerableURL, strings.NewReader(data.Encode()))
-								if err == nil {
-									replayReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-								}
-							} else {
-								replayReq, err = http.NewRequest("GET", vulnerableURL, nil)
-							}
-							if err != nil {
-								if doDebug {
-									fmt.Printf("%s Failed to create replay request: %v\n", prefixSet, err)
-								}
-							} else {
-								replayReq.Header.Set("User-Agent", userAgent)
-								for _, hdr := range customHeaders {
-									name, value, ok := strings.Cut(hdr, ":")
-									if !ok {
-										continue
-									}
-									replayReq.Header.Set(strings.TrimSpace(name), strings.TrimSpace(value))
-								}
-
-								if doDebug {
-									fmt.Printf("%s Sending replay request: %s%s%s\n", prefixSet, colorBlue, vulnerableURL, colorReset)
-								}
-								resp, err := replayClient.Do(replayReq)
-								if err != nil {
-									if doDebug {
-										fmt.Printf("%s Replay request failed: %v\n", prefixSet, err)
-									}
-								} else {
-									resp.Body.Close()
-									if doDebug {
-										fmt.Printf("%s Replay request succeeded: %s%s%s\n", prefixSet, colorYellow, vulnerableURL, colorReset)
-									}
-								}
-							}
-						}
-
+						doReplayFromRequest(recorded)
+						reportFinding(injURL, param, payload, delta, i, false)
 						mu.Lock()
 						seen[base] = true
 						mu.Unlock()
@@ -400,14 +442,80 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 
 				if stopAtFirstMatch && found {
 					if doDebug {
-						fmt.Printf("%s Stopping after first successful payload (param=%s) due to -spm\n", prefixSet, param)
+						fmt.Printf("%s Stopping after first successful payload (param=%s%s%s) due to %s-spm%s\n",
+							prefixSet, colorMagenta, param, colorReset, colorYellow, colorReset)
 					}
 					break
 				}
 			}
-
 			if stopAtFirstMatch && found {
 				break
+			}
+		}
+
+		if useUserAgentPayload {
+			for _, payload := range preparedPayloads {
+				modUserAgent := strings.TrimSpace(userAgent) + " " + payload
+
+				var req *http.Request
+				var bodyData string
+				param := "id"
+				for p := range u.Query() {
+					param = p
+					break
+				}
+
+				if usePost {
+					data := url.Values{}
+					data.Set(param, payload)
+					bodyData = data.Encode()
+					req, err = http.NewRequest("POST", j.url, strings.NewReader(bodyData))
+					if err == nil {
+						req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+					}
+				} else {
+					req, err = http.NewRequest("GET", j.url, nil)
+				}
+				if err != nil {
+					continue
+				}
+				req.Header.Set("User-Agent", modUserAgent)
+				customHeaders.ApplyTo(req)
+
+				if doDebug {
+					fmt.Printf("%s Testing payload in User-Agent header: %s%s%s\n",
+						prefixPay, colorMagenta, payload, colorReset)
+				}
+
+				start := time.Now()
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+				resp.Body.Close()
+
+				delta := time.Since(start).Seconds() - baseTime
+				if doDebug {
+					fmt.Printf("%s UA-Payload delta: %sΔ=%.2fs%s user-agent='%s'\n",
+						prefixTst, colorCyan, delta, colorReset, modUserAgent)
+				}
+
+				maxRepeats := 10
+				for i := 1; i <= maxRepeats; i++ {
+					expected := float64(sleepTime) * float64(i)
+					if delta >= expected-negDrift && delta <= expected+posDrift {
+						recorded := &recordedRequest{
+							Request: req,
+							Body:    bodyData,
+						}
+						doReplayFromRequest(recorded)
+						reportFinding(j.url, "user-agent", payload, delta, i, true)
+						mu.Lock()
+						seen[base] = true
+						mu.Unlock()
+						break
+					}
+				}
 			}
 		}
 	}
@@ -422,12 +530,48 @@ func loadPayloads(file string) ([]string, error) {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	lineNumber := 0
+	ignored := 0
+	total := 0
+
 	for scanner.Scan() {
+		lineNumber++
+		total++
 		line := strings.TrimSpace(scanner.Text())
-		if line != "" && !strings.HasPrefix(line, "#") {
+
+		switch {
+		case line == "":
+			if doDebug {
+				fmt.Fprintf(os.Stderr, "%s %sIgnoring empty line [%d]%s\n", prefixWrn, colorGray, lineNumber, colorReset)
+			}
+			ignored++
+			continue
+		case strings.HasPrefix(line, "#"):
+			if doDebug {
+				fmt.Fprintf(os.Stderr, "%s %sIgnoring comment line [%d]:%s %s\n", prefixWrn, colorGray, lineNumber, colorReset, line)
+			}
+			ignored++
+			continue
+		case !strings.Contains(line, "{SLEEP}"):
+			if doDebug {
+				fmt.Fprintf(os.Stderr, "%s %sIgnoring line without {SLEEP} [%d]:%s %s\n", prefixWrn, colorGray, lineNumber, colorReset, line)
+			}
+			ignored++
+			continue
+		default:
 			lines = append(lines, line)
 		}
 	}
+
+	if doDebug {
+		fmt.Fprintf(os.Stderr, "%s Loaded %s%d%s payload(s), %s%d%s ignored from %s%d%s total lines\n",
+			prefixSet,
+			colorGreen, len(lines), colorReset,
+			colorRed, ignored, colorReset,
+			colorCyan, total, colorReset,
+		)
+	}
+
 	return lines, scanner.Err()
 }
 
@@ -437,10 +581,24 @@ func preparePayloads() []string {
 		if !strings.Contains(payload, "{SLEEP}") {
 			continue
 		}
-		injection := strings.ReplaceAll(payload, "{SLEEP}", fmt.Sprintf("%d", sleepTime))
+
+		original := strings.ReplaceAll(payload, "{SLEEP}", fmt.Sprintf("%d", sleepTime))
+		injection := original
+
 		if shouldEncode {
 			injection = url.QueryEscape(injection)
+		} else if strings.Contains(injection, " ") {
+			encoded := url.QueryEscape(injection)
+			if doDebug {
+				fmt.Fprintf(os.Stderr, "%s %s\n", prefixWrn,
+					colorize(fmt.Sprintf("Auto-encoding payload due to space: %s → %s",
+						colorize(original, colorMagenta),
+						colorize(encoded, colorCyan),
+					), colorGray))
+			}
+			injection = encoded
 		}
+
 		prepared = append(prepared, injection)
 	}
 	return prepared
@@ -467,7 +625,7 @@ func setupHTTPClient() {
 		transport.Proxy = http.ProxyURL(parsedProxy)
 
 		if doDebug {
-			fmt.Printf("%s Proxy connectivity verified: %s%s%s\n", prefixSet, colorYellow, proxyURL, colorReset)
+			fmt.Printf("%s %s\n", prefixSet, colorize(fmt.Sprintf("Proxy connectivity verified: %s", proxyURL), colorYellow))
 		}
 	}
 
@@ -510,7 +668,7 @@ func setupReplayProxyClient() {
 	}
 
 	if doDebug {
-		fmt.Printf("%s Replay proxy verified successfully: %s%s%s\n", prefixSet, colorYellow, replayProxyURL, colorReset)
+		fmt.Printf("%s %s\n", prefixSet, colorize(fmt.Sprintf("Replay proxy verified successfully: %s", replayProxyURL), colorYellow))
 	}
 }
 
@@ -528,6 +686,7 @@ func main() {
 	flag.IntVar(&timeoutBuffer, "timeoutbuffer", 10, "Buffer (seconds) added to HTTP timeout")
 	flag.IntVar(&maxWorkers, "threads", 10, "Maximum number of concurrent workers")
 	flag.BoolVar(&stopAtFirstMatch, "spm", false, "Stop at first matching payload per URL")
+	flag.BoolVar(&useUserAgentPayload, "add-ua", false, "Also test payloads via User-Agent header")
 
 	// Request/Proxy Options
 	flag.StringVar(&proxyURL, "proxy", "", "Proxy URL, e.g. http://127.0.0.1:8080")
@@ -553,16 +712,16 @@ func main() {
 
 	flag.Parse()
 
+	if noColor {
+		disableColors()
+	}
+
 	if *showVersion {
 		fmt.Println("sqltimer version:", version)
 		os.Exit(0)
 	}
 
 	printBanner()
-
-	if noColor {
-		disableColors()
-	}
 
 	if payloadsFile == "" {
 		fmt.Fprintln(os.Stderr, "[!] You must specify a -payloads file.")
@@ -591,12 +750,6 @@ func main() {
 
 	preparedPayloads = preparePayloads()
 
-	if doDebug {
-		fmt.Printf("%s Loaded %s%d%s payloads (with {SLEEP}) from %s%s%s\n",
-			prefixSet, colorMagenta, len(preparedPayloads), colorReset,
-			colorYellow, payloadsFile, colorReset)
-	}
-
 	scanner := bufio.NewScanner(os.Stdin)
 	jobs := make(chan job, 100)
 	seen := make(map[string]bool)
@@ -615,7 +768,21 @@ func main() {
 	}
 
 	for scanner.Scan() {
-		rawURL := scanner.Text()
+		rawURL := strings.TrimSpace(scanner.Text())
+
+		if rawURL == "" {
+			continue
+		}
+
+		_, err := url.ParseRequestURI(rawURL)
+		if err != nil {
+			if doDebug {
+				fmt.Fprintf(os.Stderr, "%s %s\n", prefixWrn,
+					colorize(fmt.Sprintf("Invalid URL skipped: %s", rawURL), colorGray))
+			}
+			continue
+		}
+
 		if doDebug {
 			fmt.Printf("%s Received URL: %s%s%s\n", prefixInp, colorYellow, rawURL, colorReset)
 		}
@@ -628,10 +795,7 @@ func main() {
 	close(jobs)
 	wg.Wait()
 
-	method := "GET"
-	if usePost {
-		method = "POST"
-	}
+	method := getMethod()
 
 	if !cleanOutput {
 		fmt.Printf("%s✅ sqltimer finished%s | sleep=%s%d%s | drift=±%s%.1fs/%.1fs%s | maxtime=%s%.1fs%s | delay=%s%.1fs%s | method=%s%s%s\n",

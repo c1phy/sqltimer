@@ -11,24 +11,52 @@ A fast, minimalistic scanner for **time-based SQL injection (SQLi)** detection �
 
 ## ✨ Features
 
-- ⚡ Detects SQLi via **timing differences** (`sleep(n)`) with drift-based precision
-- 🎯 Supports **dynamic `{SLEEP}` placeholder** injection into payloads
-- 🌐 Optional **URL encoding** of injected payloads (`-encode`)
-- 🔁 Supports **GET** and **POST** methods (`-post`)
-- 🧵 **Multi-threaded** scanning with configurable workers (`-threads`)
-- 🧐 **Drift-based detection** to handle network jitter (`-negdrift` / `-posdrift`)
-- ❌ **Maximum response time limit** to reduce false positives (`-maxtime`)
-- ⏳ **Adaptive HTTP timeout** calculated dynamically (`-timeoutmultiplier` / `-timeoutbuffer`)
-- 🔗 **Proxy support** for routing all traffic via `-proxy`
-- 🛠 **Replay-proxy support** to send only vulnerable payloads via `-replay-proxy`
-- 👤 **Custom User-Agent support** with `-user-agent`
-- 📂 **Custom HTTP headers** with multiple `-header "Key:Value"` options
-- 💤 **Delay between requests** configurable with `-delay`
-- 🔔 **Integration with [ProjectDiscovery notify](https://github.com/projectdiscovery/notify)** for real-time alerts (`-notify`)
-- 🧹 **Clean mode**: output only vulnerable URLs for chaining into other tools (`-clean`)
-- 🔧 **Extensive debug output** with color-coded logs (`-debug`)
-- 🚦 **Stop at first match** (`-spm`): if one payload indicates a possible SQLi, further payloads for the same URL are skipped — reduces requests and speeds up scanning
-- 📦 **Go install ready** — easy to build, no external dependencies
+## ✨ Features
+
+### 🛡️ Detection Engine
+
+* ⚡ **Time-based SQL Injection detection** via precise `sleep(n)` delta measurement.
+* 🧐 **Drift-tolerant detection** using `-negdrift` / `-posdrift` to handle real-world network jitter.
+* ❌ **False-positive control** with `-maxtime` to skip outliers.
+* 🚦 **Stop-at-first-match** with `-spm` to minimize redundant testing.
+
+### 🧪 Payload Handling
+
+* 🎯 **Dynamic payloads** using `{SLEEP}` placeholders, automatically replaced at runtime.
+* 🌐 **Auto-encoding** for payloads with spaces unless `-encode` is explicitly set.
+* 📥 **Payload validation**: skips empty lines, comments (`#`), and lines without `{SLEEP}`.
+* 🔧 Debug output for ignored/auto-encoded payloads (line number, reason).
+
+### 🌐 Request Customization
+
+* 🔁 Supports **GET** and **POST** methods with `-post` flag.
+* 👤 Custom **User-Agent** string via `-user-agent`.
+* 🎭 **User-Agent header injection** (`-add-ua`) to test payloads through headers.
+* 📂 Support for multiple **custom headers** with `-header "Key:Value"`.
+
+### 🔗 Proxy & Replay
+
+* 🔗 Full **proxy support** with `-proxy`.
+* 🔁 **Replay proxy** for vulnerable findings only (`-replay-proxy`).
+* 🛠️ Modular replay engine supports full POST replay with correct content types and headers.
+
+### 🧵 Performance & Control
+
+* 🧵 **Multi-threaded scanning** using `-threads` to control concurrency.
+* 💤 Adjustable **delay between requests** with `-delay`, applies to base and payloads.
+* ⏳ **Adaptive timeout** calculated using `sleep * timeoutmultiplier + timeoutbuffer`.
+
+### 🧼 Output & UX
+
+* 🧹 **Clean mode** (`-clean`) to output only vulnerable URLs (ideal for piping).
+* 🔔 Integration with **ProjectDiscovery notify** for real-time alerts (`-notify`).
+* 🔧 **Color-coded debug logs** with detailed CLI feedback (`-debug`).
+* 📛 **Legend, banners, and prefixes** for clean, readable output.
+
+### 📥 Input Validation
+
+* 🚫 Skips **invalid or malformed URLs** from stdin (with debug messages).
+* ✅ Ensures payloads in file are syntactically valid and informative when skipped.
 
 ---
 
@@ -103,33 +131,36 @@ sqltimer/
 
 ## 🛠 Options
 
-| Flag                  | Description                                                | Default      |
-|------------------------|-------------------------------------------------------------|--------------|
-| **General Options**    |                                                             |              |
-| `-payloads`            | Path to payload list (required)                             | –            |
-| `-version`             | Show current sqltimer version and exit                      | `false`      |
-| **Scan/Timing Options**|                                                             |              |
-| `-sleep`               | Sleep duration in seconds                                   | `10`         |
-| `-negdrift`            | Allowed negative drift from sleep time                      | `0.1`        |
-| `-posdrift`            | Allowed positive drift from sleep time                      | `0.5`        |
-| `-maxtime`             | Maximum allowed delta response time before skipping (s)     | `30.0`       |
-| `-timeoutmultiplier`   | Multiplier for sleep time to calculate HTTP timeout          | `6`          |
-| `-timeoutbuffer`       | Buffer (seconds) added to HTTP timeout                      | `10`         |
-| `-threads`             | Number of concurrent workers                                | `10`         |
-| `-delay`               | Delay between individual HTTP requests (seconds)            | `0`         |
-| `-spm`                 | Stop processing more payloads for a URL after first match   | `false`      |
-| **Request/Proxy Options**|                                                          |              |
-| `-proxy`               | Send all traffic through HTTP proxy                         | –            |
-| `-replay-proxy`        | Only send vulnerable payloads through proxy                 | –            |
-| `-user-agent`          | Custom User-Agent string                                    | Firefox 124  |
-| `-header`              | Add custom header(s) (`Key:Value`) – can be used multiple times | –         |
-| `-post`                | Send payloads using POST method instead of GET              | `false`      |
-| `-encode`              | URL-encode payloads before injecting                        | `false`      |
-| **Output/Debugging Options**|                                                      |              |
-| `-notify`              | Send matches to [notify](https://github.com/projectdiscovery/notify) | `false` |
-| `-debug`               | Enable verbose debug output                                 | `false`      |
-| `-nocolor`             | Disable colored terminal output                             | `false`      |
-| `-clean`               | Output only vulnerable URLs to stdout                       | `false`      |
+## 🛠 Options
+
+| Flag                    | Description                                                    | Default      |
+|-------------------------|----------------------------------------------------------------|--------------|
+| **General Options**     |                                                                |              |
+| `-payloads`             | Path to payload list (required)                                | –            |
+| `-version`              | Show current sqltimer version and exit                         | `false`      |
+| **Scan & Timing**       |                                                                |              |
+| `-sleep`                | Sleep duration injected in payloads (in seconds)               | `10`         |
+| `-negdrift`             | Allowed negative timing drift from expected sleep              | `0.1`        |
+| `-posdrift`             | Allowed positive timing drift from expected sleep              | `0.5`        |
+| `-maxtime`              | Maximum allowed delta time before a response is skipped        | `30.0`       |
+| `-timeoutmultiplier`    | Multiplier to calculate HTTP timeout based on sleep time       | `6`          |
+| `-timeoutbuffer`        | Additional seconds added to calculated timeout                 | `10`         |
+| `-threads`              | Number of concurrent scan workers                              | `10`         |
+| `-delay`                | Delay between individual HTTP requests (in seconds)            | `0`          |
+| `-spm`                  | Stop scanning after the first matching payload per URL         | `false`      |
+| `-add-ua`               | Also inject payloads via the `User-Agent` header               | `false`      |
+| **Request & Proxy**     |                                                                |              |
+| `-proxy`                | Send all traffic through the specified HTTP proxy              | –            |
+| `-replay-proxy`         | Replay only detected hits through proxy for deeper inspection  | –            |
+| `-user-agent`           | Custom User-Agent string                                       | Firefox 124  |
+| `-header`               | Add custom header (`Key:Value`). Can be used multiple times    | –            |
+| `-post`                 | Use POST method for payload delivery (default is GET)          | `false`      |
+| `-encode`               | Fully URL-encode payloads before injection                     | `false`      |
+| **Output & Debug**      |                                                                |              |
+| `-notify`               | Send hits to [notify](https://github.com/projectdiscovery/notify) | `false`   |
+| `-debug`                | Enable detailed debug output with timing and decisions         | `false`      |
+| `-nocolor`              | Disable color-coded terminal output                            | `false`      |
+| `-clean`                | Output only vulnerable URLs (good for tool chaining)           | `false`      |
 
 ---
 
@@ -198,21 +229,41 @@ All matches will be piped into your `notify` pipeline automatically.
 
 ---
 
-## ❤️ Tips
+## ❤️ Usage Tips
 
-- Use a higher `-sleep` (e.g. 10s) for more stable detections.
-- For stable servers, use defaults `-negdrift 0.1` and `-posdrift 0.5`.
-- Combine sqltimer with tools like `waybackurls`, `gau`, `ffuf`, etc.
-- Use `-debug` to analyze timing behavior and understand anomalies.
-- In noisy environments, increase `-posdrift` slightly (e.g., 0.6).
-- Set `-clean` if you only want vuln URLs, ideal for chaining into other tools (e.g., `sqltimer ... -clean | awk '{print $1}'` for clean output).
-- Use `-proxy` to route **all** traffic through an HTTP proxy.
-- Use `-replay-proxy` if you only want to replay **vulnerable payloads** through a different proxy (e.g., for logging or exploitation).
-- When both `-proxy` and `-replay-proxy` are set, **-proxy takes priority** and all traffic will use the main proxy.
-- Customize HTTP requests fully with `-user-agent` and `-header` to bypass basic WAF protections.
-- Introduce a `-delay` between requests (e.g., `-delay 2`) to slow down scan speed for unstable targets or rate-limited servers.
-- Try `-post` if GET is filtered or blocked - sometimes POST works better!
-- Use `-spm` to minimize requests and move on to the next URL as soon as a payload hits.
+### 🎯 Detection Accuracy
+
+* Use a higher `-sleep` value (e.g., `10`) for more reliable detection.
+* For stable networks, keep default drift settings: `-negdrift 0.1` and `-posdrift 0.5`.
+* In noisy environments (e.g., cloud targets), increase `-posdrift` slightly (e.g., `0.6`) to reduce false negatives.
+* Use `-debug` to trace timing behavior and fine-tune drift or delays.
+
+### 🧪 Payload Strategies
+
+* Enable `-add-ua` to test payloads in the **User-Agent** header.
+* Switch to `-post` if GET-based payloads are filtered or blocked by the server.
+* Use `-spm` (stop-after-match) to reduce noise and scan faster by skipping further payloads once a hit is found.
+
+### 🔗 Integration & Automation
+
+* Pipe input from tools like [`waybackurls`](https://github.com/tomnomnom/waybackurls), [`gau`](https://github.com/lc/gau), or [`ffuf`](https://github.com/ffuf/ffuf).
+* Combine with `-clean` for chaining into other tools:
+
+  ```bash
+  sqltimer ... -clean | awk '{print $1}'
+  ```
+
+### 🌐 Proxy & Replay
+
+* Use `-proxy` to send **all** traffic through a proxy (e.g., Burp/ZAP).
+* Use `-replay-proxy` to send only detected **vulnerable requests** through a secondary proxy for logging, inspection, or exploitation.
+* If both are specified, `-proxy` takes precedence and is used for all traffic.
+
+### ⚙️ Customization
+
+* Set a custom `-user-agent` to blend in or bypass basic filters.
+* Use `-header "Key:Value"` one or more times to add arbitrary HTTP headers (e.g., auth tokens, X-Forwarded-For).
+* Use `-delay` to slow down scanning for unstable targets or rate-limited endpoints (e.g., `-delay 2`).
 
 ---
 
