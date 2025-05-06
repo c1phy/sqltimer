@@ -11,8 +11,6 @@ A fast, minimalistic scanner for **time-based SQL injection (SQLi)** detection �
 
 ## ✨ Features
 
-## ✨ Features
-
 ### 🛡️ Detection Engine
 
 * ⚡ **Time-based SQL Injection detection** via precise `sleep(n)` delta measurement.
