@@ -43,7 +43,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.4.2"
+	version          = "v0.4.3"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -356,16 +356,15 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		if len(params) == 0 && !useUserAgentPayload {
 			if doDebug {
 				fmt.Printf("%s %sSkipping URL (no params, no add-ua):%s %s%s%s\n",
-					prefixWrn,
-					colorGray, colorReset,
-					colorYellow, j.url, colorReset)
+					prefixWrn, colorGray, colorReset, colorYellow, j.url, colorReset)
 			}
 			continue
 		}
 
 		if delaySeconds > 0 && ticker != nil {
 			if doDebug {
-				fmt.Printf("%s %s\n", prefixSlp, colorize(fmt.Sprintf("Delay %.1fs before base request to %s", delaySeconds, u.Host), colorGray))
+				fmt.Printf("%s %s\n", prefixSlp,
+					colorize(fmt.Sprintf("Delay %.1fs before base request to %s", delaySeconds, u.Host), colorGray))
 			}
 			<-ticker.C
 		}
@@ -399,8 +398,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
 						fmt.Printf("%s %s\n", prefixSlp,
-							colorize(fmt.Sprintf("Delay %.1fs before payload injection: param=%s payload=%s",
-								delaySeconds, param, payload), colorGray))
+							colorize(fmt.Sprintf("Delay %.1fs before payload injection: param=%s payload=%s", delaySeconds, param, payload), colorGray))
 					}
 					<-ticker.C
 				}
@@ -416,18 +414,15 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				}
 
 				delta := injTime - baseTime
-
 				if doDebug {
 					fmt.Printf("%s Payload delta: %sΔ=%.2fs%s param=%s%s%s url=%s%s%s\n",
-						prefixTst,
-						colorCyan, delta, colorReset,
-						colorMagenta, param, colorReset,
-						colorYellow, injURL, colorReset)
+						prefixTst, colorCyan, delta, colorReset, colorMagenta, param, colorReset, colorYellow, injURL, colorReset)
 				}
 
 				if delta > maxResponseTime {
 					continue
 				}
+
 				for i := 1; i <= maxRepeats; i++ {
 					expected := float64(sleepTime) * float64(i)
 					if delta >= expected-negDrift && delta <= expected+posDrift {
@@ -455,6 +450,14 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 		}
 
 		if useUserAgentPayload {
+			if stopAtFirstMatch && found {
+				if doDebug {
+					fmt.Printf("%s Skipping User-Agent payloads due to %s-spm%s (already matched)\n",
+						prefixSet, colorYellow, colorReset)
+				}
+				continue
+			}
+
 			for _, payload := range preparedPayloads {
 				modUserAgent := strings.TrimSpace(userAgent) + " " + payload
 
@@ -480,6 +483,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				if err != nil {
 					continue
 				}
+
 				req.Header.Set("User-Agent", modUserAgent)
 				customHeaders.ApplyTo(req)
 
@@ -491,8 +495,7 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
 						fmt.Printf("%s %s\n", prefixSlp,
-							colorize(fmt.Sprintf("Delay %.1fs before UA payload injection: payload=%s",
-								delaySeconds, payload), colorGray))
+							colorize(fmt.Sprintf("Delay %.1fs before UA payload injection: payload=%s", delaySeconds, payload), colorGray))
 					}
 					<-ticker.C
 				}
