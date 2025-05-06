@@ -43,7 +43,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.4.0"
+	version          = "v0.4.1"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -67,6 +67,8 @@ var (
 	prefixWrn = colorRed + "[WRN]" + colorReset
 	prefixSlp = colorGray + "[SLP]" + colorReset
 )
+
+const maxRepeats = 10
 
 type headerList []string
 
@@ -426,7 +428,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				if delta > maxResponseTime {
 					continue
 				}
-				maxRepeats := 10
 				for i := 1; i <= maxRepeats; i++ {
 					expected := float64(sleepTime) * float64(i)
 					if delta >= expected-negDrift && delta <= expected+posDrift {
@@ -482,9 +483,13 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				req.Header.Set("User-Agent", modUserAgent)
 				customHeaders.ApplyTo(req)
 
-				if doDebug {
-					fmt.Printf("%s Testing payload in User-Agent header: %s%s%s\n",
-						prefixPay, colorMagenta, payload, colorReset)
+				if delaySeconds > 0 && ticker != nil {
+					if doDebug {
+						fmt.Printf("%s %s\n", prefixSlp,
+							colorize(fmt.Sprintf("Delay %.1fs before UA payload injection: payload=%s",
+								delaySeconds, payload), colorGray))
+					}
+					<-ticker.C
 				}
 
 				start := time.Now()
@@ -500,7 +505,6 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 						prefixTst, colorCyan, delta, colorReset, modUserAgent)
 				}
 
-				maxRepeats := 10
 				for i := 1; i <= maxRepeats; i++ {
 					expected := float64(sleepTime) * float64(i)
 					if delta >= expected-negDrift && delta <= expected+posDrift {
