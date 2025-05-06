@@ -43,7 +43,7 @@ var (
 	userAgent        string
 	payloads         []string
 	preparedPayloads []string
-	version          = "v0.4.1"
+	version          = "v0.4.2"
 	maxResponseTime  = 30.0
 
 	client       *http.Client
@@ -482,6 +482,11 @@ func worker(jobs <-chan job, wg *sync.WaitGroup, mu *sync.Mutex, seen map[string
 				}
 				req.Header.Set("User-Agent", modUserAgent)
 				customHeaders.ApplyTo(req)
+
+				if doDebug {
+					fmt.Printf("%s Testing payload in User-Agent header: %s%s%s\n",
+						prefixPay, colorMagenta, payload, colorReset)
+				}
 
 				if delaySeconds > 0 && ticker != nil {
 					if doDebug {
