@@ -269,6 +269,14 @@ MIT License – use it, improve it, share it.
 
 ---
 
+## ⚠️ Disclaimer
+
+This tool is provided for educational and authorized security testing purposes only.  
+Do **not** use it on systems without explicit permission.  
+The author assumes **no responsibility** for any misuse or damage caused by this tool.
+
+---
+
 ## 🙋 About the Author
 
 Marc-Oliver Munz – [munz4u.de](https://munz4u.de)
